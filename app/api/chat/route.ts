@@ -13,16 +13,22 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true, version: "gemini-fts-v1" });
 
-  // 1) Create or reuse a session
+  // Create or reuse a session
   let sid = sessionId;
   if (!sid) {
-    const { data: session, error } = await supabaseServer
+    const { data: session, error: sessionError } = await supabaseServer
       .from("chat_sessions")
       .insert({ title: message.slice(0, 60) })
       .select("id")
       .single();
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (sessionError) {
+      return NextResponse.json({ error: sessionError.message }, { status: 500 });
+    }
+    if (!session) {
+      return NextResponse.json({ error: "Failed to create session" }, { status: 500 });
+    }
+
     sid = session.id;
   }
 
