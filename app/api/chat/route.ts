@@ -11,10 +11,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing message" }, { status: 400 });
   }
 
-  return NextResponse.json({ ok: true, version: "gemini-fts-v1" });
-
   // Create or reuse a session
   let sid = sessionId;
+
   if (!sid) {
     const { data: session, error: sessionError } = await supabaseServer
       .from("chat_sessions")
@@ -23,29 +22,46 @@ export async function POST(req: Request) {
       .single();
 
     if (sessionError) {
-      return NextResponse.json({ error: sessionError.message }, { status: 500 });
+      return NextResponse.json(
+        { error: sessionError?.message ?? "Failed to create session" },
+        { status: 500 }
+      );
     }
+
     if (!session) {
-      return NextResponse.json({ error: "Failed to create session" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to create session" },
+        { status: 500 }
+      );
     }
 
     sid = session.id;
   }
 
-  // 2) Save user message
+  // Save user message
   const { error: insUserErr } = await supabaseServer
     .from("chat_messages")
     .insert({ session_id: sid, role: "user", content: message });
 
-  if (insUserErr) return NextResponse.json({ error: insUserErr.message }, { status: 500 });
+  if (insUserErr) {
+    return NextResponse.json(
+      { error: insUserErr.message },
+      { status: 500 }
+    );
+  }
 
-  // 3) Retrieve relevant context from Supabase (FTS)
+  // Retrieve relevant context from Supabase (FTS)
   const { data: matches, error: matchErr } = await supabaseServer.rpc(
     "match_knowledge_base_fts",
     { query_text: message, match_count: 6 }
   );
 
-  if (matchErr) return NextResponse.json({ error: matchErr.message }, { status: 500 });
+  if (matchErr) {
+    return NextResponse.json(
+      { error: matchErr.message },
+      { status: 500 }
+    );
+  }
 
   const sources = (matches ?? []).map((m: any) => ({
     title: m.title ?? "(no title)",
@@ -65,10 +81,14 @@ ${m.content ?? ""}`;
     })
     .join("\n\n---\n\n");
 
-  // 4) Ask Gemini to answer using ONLY the retrieved context
+  // Ask Gemini to answer using only the retrieved context
   const apiKey = process.env.GEMINI_API_KEY;
+
   if (!apiKey) {
-    return NextResponse.json({ error: "Missing GEMINI_API_KEY" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Missing GEMINI_API_KEY" },
+      { status: 500 }
+    );
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
@@ -92,14 +112,18 @@ ${message}
   const result = await model.generateContent(prompt);
   const answerText = result.response.text();
 
-  // 5) Save assistant message
+  // Save assistant message
   const { error: insAsstErr } = await supabaseServer
     .from("chat_messages")
     .insert({ session_id: sid, role: "assistant", content: answerText });
 
-  if (insAsstErr) return NextResponse.json({ error: insAsstErr.message }, { status: 500 });
+  if (insAsstErr) {
+    return NextResponse.json(
+      { error: insAsstErr.message },
+      { status: 500 }
+    );
+  }
 
-  // 6) Return response
   return NextResponse.json({
     sessionId: sid,
     answer: answerText,
