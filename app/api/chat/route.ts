@@ -180,8 +180,8 @@ ${message}
       sources,
       debug: {
         searchQuery,
-        rawMatchCount: matches?.length ?? 0,
-        strongMatchCount: strongMatches.length,
+        rawMatchCount: internalMatches?.length ?? 0,
+        strongMatchCount: strongInternalMatches.length,
       },
     });
   } catch (err: any) {
