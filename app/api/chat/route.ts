@@ -69,7 +69,7 @@ export async function POST(req: Request) {
     const searchQuery = simplifySearchQuery(message);
 
     const { data: matches, error: matchErr } = await supabaseServer.rpc(
-      "match_knowledge_base_threads_fts",
+      "match_knowledge_base_threads_hybrid",
       { query_text: searchQuery, match_count: 10 }
     );
 
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
     console.log("RAW MATCH COUNT:", matches?.length ?? 0);
 
     const strongMatches = (matches ?? []).filter(
-      (m: any) => (m.rank ?? 0) > 0.02
+      (m: any) => (m.score ?? 0) > 0.08
     );
 
     console.log("STRONG MATCH COUNT:", strongMatches.length);
@@ -92,27 +92,26 @@ export async function POST(req: Request) {
       "TOP STRONG MATCHES:",
       strongMatches.slice(0, 3).map((m: any) => ({
         title: m.title,
-        rank: m.rank,
+        score: m.score,
         preview: String(m.content ?? "").slice(0, 200),
       }))
     );
-
     const sources = strongMatches.map((m: any) => ({
       title: m.title ?? "(no title)",
       url: m.source_url ?? "",
       type: m.source_type ?? "",
-      rank: m.rank ?? 0,
+      score: m.score ?? 0,
     }));
 
     const context = strongMatches
       .map((m: any, i: number) => {
         return `SOURCE ${i + 1}
-TYPE: ${m.source_type ?? "unknown"}
-TITLE: ${m.title ?? "(no title)"}
-URL: ${m.source_url ?? "(none)"}
-RANK: ${m.rank ?? 0}
-CONTENT:
-${m.content ?? ""}`;
+    TYPE: ${m.source_type ?? "unknown"}
+    TITLE: ${m.title ?? "(no title)"}
+    URL: ${m.source_url ?? "(none)"}
+    SCORE: ${m.score ?? 0}
+    CONTENT:
+    ${m.content ?? ""}`;
       })
       .join("\n\n---\n\n");
 
