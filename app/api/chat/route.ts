@@ -2,6 +2,18 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+function simplifySearchQuery(input: string) {
+  return input
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .replace(
+      /\b(for|the|do|we|when|what|is|are|to|can|just|be|or|being|sent|a|an|of|in|on|with)\b/g,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export async function POST(req: Request) {
   try {
     console.log("POST /api/chat start");
@@ -54,9 +66,11 @@ export async function POST(req: Request) {
     }
 
     console.log("Running FTS search...");
+    const searchQuery = simplifySearchQuery(message);
+
     const { data: matches, error: matchErr } = await supabaseServer.rpc(
       "match_knowledge_base_threads_fts",
-      { query_text: message, match_count: 6 }
+      { query_text: searchQuery, match_count: 10 }
     );
 
     if (matchErr) {
@@ -66,19 +80,37 @@ export async function POST(req: Request) {
       );
     }
 
-    const sources = (matches ?? []).map((m: any) => ({
+    console.log("SEARCH QUERY:", searchQuery);
+    console.log("RAW MATCH COUNT:", matches?.length ?? 0);
+
+    const strongMatches = (matches ?? []).filter(
+      (m: any) => (m.rank ?? 0) > 0.02
+    );
+
+    console.log("STRONG MATCH COUNT:", strongMatches.length);
+    console.log(
+      "TOP STRONG MATCHES:",
+      strongMatches.slice(0, 3).map((m: any) => ({
+        title: m.title,
+        rank: m.rank,
+        preview: String(m.content ?? "").slice(0, 200),
+      }))
+    );
+
+    const sources = strongMatches.map((m: any) => ({
       title: m.title ?? "(no title)",
       url: m.source_url ?? "",
       type: m.source_type ?? "",
       rank: m.rank ?? 0,
     }));
 
-    const context = (matches ?? [])
+    const context = strongMatches
       .map((m: any, i: number) => {
         return `SOURCE ${i + 1}
 TYPE: ${m.source_type ?? "unknown"}
 TITLE: ${m.title ?? "(no title)"}
 URL: ${m.source_url ?? "(none)"}
+RANK: ${m.rank ?? 0}
 CONTENT:
 ${m.content ?? ""}`;
       })
@@ -102,14 +134,19 @@ ${m.content ?? ""}`;
 
 Rules:
 - Use ONLY the context provided below.
-- If the answer is not in the context, say: "I don't see that in our internal notes yet." Then ask 1-2 follow-up questions.
-- Provide a short, practical answer with steps.
-- End with: "Sources:" and list the URLs you used (only URLs that appear in the context).
+- Only answer if the context directly addresses the user's question.
+- If the context is only loosely related or does not actually answer the question, say:
+  "I don't see a direct answer in our internal notes yet."
+- If there is not enough information, ask 1-2 short follow-up questions.
+- Keep the answer short and practical.
+- If the context includes a likely answer, summarize it plainly.
+- End with: "Sources:" and list only the source URLs you actually used.
+- Never invent details that are not in the context.
 
 CONTEXT:
 ${context || "No context found."}
 
-QUESTION:
+USER QUESTION:
 ${message}
 `;
 
@@ -133,6 +170,11 @@ ${message}
       sessionId: sid,
       answer: answerText,
       sources,
+      debug: {
+        searchQuery,
+        rawMatchCount: matches?.length ?? 0,
+        strongMatchCount: strongMatches.length,
+      },
     });
   } catch (err: any) {
     console.error("POST /api/chat fatal error:", err);
