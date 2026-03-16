@@ -55,7 +55,7 @@ export async function POST(req: Request) {
 
     console.log("Running FTS search...");
     const { data: matches, error: matchErr } = await supabaseServer.rpc(
-      "match_knowledge_base_fts",
+      "match_knowledge_base_threads_fts",
       { query_text: message, match_count: 6 }
     );
 
