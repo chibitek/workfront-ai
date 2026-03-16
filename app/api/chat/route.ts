@@ -138,7 +138,6 @@ Rules:
 - If the internal notes are weak, incomplete, or ambiguous, say so briefly and still provide the best likely answer.
 - If external web results are provided, use them as supplemental context and clearly separate internal findings from external findings.
 - End with: "Sources:" and list the internal and external sources actually used.
-`;
 
 CONTEXT:
 ${context || "No context found."}
