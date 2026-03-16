@@ -6,10 +6,7 @@ function simplifySearchQuery(input: string) {
   return input
     .toLowerCase()
     .replace(/[^\w\s]/g, " ")
-    .replace(
-      /\b(for|the|do|we|when|what|is|are|to|can|just|be|or|being|sent|a|an|of|in|on|with)\b/g,
-      " "
-    )
+    .replace(/\b(for|the|do|we|when|what|is|are|to|can|just|be|or|being|sent|a|an|of|in|on|with|how)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -65,51 +62,67 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log("Running FTS search...");
+    console.log("Running internal search...");
     const searchQuery = simplifySearchQuery(message);
 
-    const { data: matches, error: matchErr } = await supabaseServer.rpc(
+    const { data: internalMatches, error: internalErr } = await supabaseServer.rpc(
       "match_knowledge_base_threads_hybrid",
       { query_text: searchQuery, match_count: 10 }
     );
 
-    if (matchErr) {
+    if (internalErr) {
       return NextResponse.json(
-        { error: matchErr.message },
+        { error: internalErr.message },
         { status: 500 }
       );
     }
 
-    console.log("SEARCH QUERY:", searchQuery);
-    console.log("RAW MATCH COUNT:", matches?.length ?? 0);
-
-    const strongMatches = (matches ?? []).filter(
-      (m: any) => (m.score ?? 0) > 0.08
+    const strongInternalMatches = (internalMatches ?? []).filter(
+      (m: any) => (m.score ?? m.rank ?? 0) > 0.05
     );
 
-    console.log("STRONG MATCH COUNT:", strongMatches.length);
-    console.log(
-      "TOP STRONG MATCHES:",
-      strongMatches.slice(0, 3).map((m: any) => ({
-        title: m.title,
-        score: m.score,
-        preview: String(m.content ?? "").slice(0, 200),
-      }))
-    );
-    const sources = strongMatches.map((m: any) => ({
+    console.log("Internal search query:", searchQuery);
+    console.log("Internal matches:", strongInternalMatches.length);
+
+    let finalMatches = strongInternalMatches;
+    let sourceMode: "internal" | "external" = "internal";
+
+    if (finalMatches.length === 0) {
+      console.log("No strong internal matches. Running external fallback...");
+
+      const { data: externalMatches, error: externalErr } = await supabaseServer.rpc(
+        "match_knowledge_base_external_fts",
+        { query_text: searchQuery, match_count: 6 }
+      );
+
+      if (externalErr) {
+        return NextResponse.json(
+          { error: externalErr.message },
+          { status: 500 }
+        );
+      }
+
+      finalMatches = (externalMatches ?? []).filter(
+        (m: any) => (m.rank ?? 0) > 0.01
+      );
+
+      sourceMode = "external";
+    }
+
+    const sources = finalMatches.map((m: any) => ({
       title: m.title ?? "(no title)",
       url: m.source_url ?? "",
       type: m.source_type ?? "",
-      score: m.score ?? 0,
+      score: m.score ?? m.rank ?? 0,
     }));
 
-    const context = strongMatches
+    const context = finalMatches
       .map((m: any, i: number) => {
         return `SOURCE ${i + 1}
     TYPE: ${m.source_type ?? "unknown"}
     TITLE: ${m.title ?? "(no title)"}
     URL: ${m.source_url ?? "(none)"}
-    SCORE: ${m.score ?? 0}
+    SCORE: ${m.score ?? m.rank ?? 0}
     CONTENT:
     ${m.content ?? ""}`;
       })
