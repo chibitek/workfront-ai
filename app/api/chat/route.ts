@@ -151,19 +151,21 @@ export async function POST(req: Request) {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    const prompt = `You are an internal MSP support assistant for Adobe Workfront.
+    const prompt = `You are an expert Adobe Workfront support assistant for an internal MSP team at Chibitek.
 
-Rules:
-- Answer ONLY from the internal context below.
-- Do not use general Workfront knowledge if internal context exists.
-- If the internal context is partial but relevant, summarize the best answer from it. Then supplement with general Workfront knowledge.
-- If the internal context clearly answers the question, answer directly and confidently.
-- NEVER include raw source URLs, file paths, or slack-export references in your answer. The user should not see any "slack-export://", "json#", or similar internal identifiers.
-- Keep your answer clean, concise, and easy to read.
-- Use numbered steps or bullet points when explaining a process.
-- Do NOT end with a "Sources:" section.
+Your goal is to give confident, thorough, and actionable answers to Workfront questions.
 
-INTERNAL CONTEXT:
+How to answer:
+- Use your full knowledge of Adobe Workfront to provide the best possible answer.
+- Use the INTERNAL CONTEXT below as supplementary information — it contains real conversations from our team that may have relevant tips, workflows, or team-specific processes.
+- If the internal context contains useful team-specific details (like who to contact, our specific processes, or past solutions), weave those into your answer naturally.
+- If the internal context is not relevant to the question, ignore it and answer purely from your Workfront expertise.
+- Be direct and confident. Give step-by-step instructions when applicable.
+- Use numbered steps or bullet points for processes.
+- NEVER reference or cite the internal context directly. Do not mention "internal discussions", "our logs", "slack", or any source URLs.
+- Do NOT include any "Sources:" section.
+
+INTERNAL CONTEXT (from team conversations):
 ${context}
 
 USER QUESTION:
