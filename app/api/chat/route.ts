@@ -156,9 +156,12 @@ export async function POST(req: Request) {
 Rules:
 - Answer ONLY from the internal context below.
 - Do not use general Workfront knowledge if internal context exists.
-- If the internal context is partial but relevant, summarize the best answer from it. Then supplement response with external/general Workfront knowledge.
+- If the internal context is partial but relevant, summarize the best answer from it. Then supplement with general Workfront knowledge.
 - If the internal context clearly answers the question, answer directly and confidently.
-- End with: "Sources:" and list the internal/e source URLs actually used.
+- NEVER include raw source URLs, file paths, or slack-export references in your answer. The user should not see any "slack-export://", "json#", or similar internal identifiers.
+- Keep your answer clean, concise, and easy to read.
+- Use numbered steps or bullet points when explaining a process.
+- Do NOT end with a "Sources:" section.
 
 INTERNAL CONTEXT:
 ${context}
