@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { createServerSupabaseClient } from "@/lib/supabaseServerAuth";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 function simplifySearchQuery(input: string) {
@@ -14,6 +15,14 @@ function simplifySearchQuery(input: string) {
 export async function POST(req: Request) {
   try {
     console.log("POST /api/chat start");
+
+    // Validate auth
+    const supabaseAuth = await createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const body = await req.json();
     const message = String(body?.message ?? "");
