@@ -14,16 +14,15 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const scrollOnNextUpdate = useRef(false);
 
-  useEffect(() => {
-    if (scrollOnNextUpdate.current) {
-      scrollOnNextUpdate.current = false;
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  function scrollToBottom() {
+    const el = messagesContainerRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
     }
-  }, [messages, isTyping]);
+  }
 
   useEffect(() => {
     if (!loading && user) {
@@ -35,7 +34,7 @@ export default function Home() {
     const text = input.trim();
     if (!text || isTyping) return;
 
-    scrollOnNextUpdate.current = true;
+    setTimeout(scrollToBottom, 50);
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setInput("");
     setIsTyping(true);
@@ -132,7 +131,7 @@ export default function Home() {
       </header>
 
       {/* Messages */}
-      <div className="chat-messages" id="chat-messages">
+      <div className="chat-messages" id="chat-messages" ref={messagesContainerRef}>
         {messages.length === 0 && !isTyping ? (
           <div className="chat-empty">
             <div className="chat-empty-icon">
@@ -208,7 +207,7 @@ export default function Home() {
             )}
           </>
         )}
-        <div ref={messagesEndRef} />
+
       </div>
 
       {/* Input */}
