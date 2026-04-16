@@ -37,6 +37,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const message = String(body?.message ?? "");
     const sessionId = body?.sessionId as string | undefined;
+    const imageBase64 = body?.image as string | undefined;
 
     if (!message.trim()) {
       return Response.json({ error: "Missing message" }, { status: 400 });
@@ -161,7 +162,8 @@ How to answer:
 - Do NOT include any "Sources:" section.
 
 INTERNAL CONTEXT (from team conversations):
-${context}`;
+${context}
+${imageBase64 ? "\nThe user has attached a screenshot. Analyze the image carefully and incorporate what you see into your response. Describe any errors, UI elements, or issues visible in the screenshot." : ""}`;
 
     // Capture the session ID to send to the client
     const capturedSid = sid;
@@ -174,11 +176,19 @@ ${context}`;
           // Send the sessionId as the first line so the client can capture it
           controller.enqueue(encoder.encode(`__SESSION__:${capturedSid}\n`));
 
+          const userMsg: { role: string; content: string; images?: string[] } = {
+            role: "user",
+            content: message,
+          };
+          if (imageBase64) {
+            userMsg.images = [imageBase64];
+          }
+
           const response = await ollama.chat({
             model: OLLAMA_MODEL,
             messages: [
               { role: "system", content: systemPrompt },
-              { role: "user", content: message },
+              userMsg,
             ],
             stream: true,
           });

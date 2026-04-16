@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "@/app/components/AuthProvider";
 
 type Message = {
   role: "user" | "assistant";
   content: string;
+  image?: string; // data URL for display
 };
 
 export default function Home() {
@@ -14,8 +15,12 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
+  const [attachedImage, setAttachedImage] = useState<{ dataUrl: string; base64: string; name: string } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragCounter = useRef(0);
 
   function scrollToBottom() {
     const el = messagesContainerRef.current;
@@ -30,13 +35,89 @@ export default function Home() {
     }
   }, [loading, user]);
 
+  // Process an image file into base64
+  const processImageFile = useCallback((file: File) => {
+    if (!file.type.startsWith("image/")) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert("Image must be under 10MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      // Extract pure base64 (remove "data:image/png;base64," prefix)
+      const base64 = dataUrl.split(",")[1];
+      setAttachedImage({ dataUrl, base64, name: file.name });
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  // Drag & drop handlers
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current = 0;
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const imageFile = Array.from(files).find((f) => f.type.startsWith("image/"));
+      if (imageFile) {
+        processImageFile(imageFile);
+      }
+    }
+  }, [processImageFile]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processImageFile(file);
+    }
+    // Reset file input so the same file can be selected again
+    e.target.value = "";
+  }, [processImageFile]);
+
   async function sendMessage() {
     const text = input.trim();
-    if (!text || isTyping) return;
+    if ((!text && !attachedImage) || isTyping) return;
 
     setTimeout(scrollToBottom, 50);
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
+
+    // Build user message with optional image
+    const userMessage: Message = {
+      role: "user",
+      content: text || (attachedImage ? "What is shown in this screenshot?" : ""),
+      ...(attachedImage ? { image: attachedImage.dataUrl } : {}),
+    };
+
+    const imageBase64 = attachedImage?.base64 || null;
+
+    setMessages((prev) => [...prev, userMessage]);
     setInput("");
+    setAttachedImage(null);
     setIsTyping(true);
 
     // Add an empty assistant message that we'll fill incrementally
@@ -46,7 +127,11 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, sessionId }),
+        body: JSON.stringify({
+          message: userMessage.content,
+          sessionId,
+          ...(imageBase64 ? { image: imageBase64 } : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -83,7 +168,6 @@ export default function Home() {
             const newSid = sessionLine.replace("__SESSION__:", "");
             setSessionId(newSid);
             sessionCaptured = true;
-            // Get any remaining text after the session line
             const rest = lines.filter((l: string) => !l.startsWith("__SESSION__:")).join("\n");
             if (rest) {
               fullText += rest;
@@ -142,6 +226,7 @@ export default function Home() {
   function handleNewChat() {
     setMessages([]);
     setSessionId(null);
+    setAttachedImage(null);
     inputRef.current?.focus();
   }
 
@@ -162,7 +247,28 @@ export default function Home() {
   const userAvatar = user.user_metadata?.avatar_url;
 
   return (
-    <div className="chat-page">
+    <div
+      className="chat-page"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Drag & Drop Overlay */}
+      {isDragging && (
+        <div className="chat-drag-overlay">
+          <div className="chat-drag-overlay-content">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21 15 16 10 5 21" />
+            </svg>
+            <p>Drop your screenshot here</p>
+            <span>PNG, JPG, GIF, or WebP — up to 10MB</span>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="chat-header" id="chat-header">
         <div className="chat-header-left">
@@ -208,7 +314,7 @@ export default function Home() {
               </svg>
             </div>
             <h2>How can I help with Workfront?</h2>
-            <p>Ask any question about Adobe Workfront — I'll search our internal knowledge base and provide an answer.</p>
+            <p>Ask any question about Adobe Workfront — I'll search our internal knowledge base and provide an answer. You can also attach screenshots for analysis.</p>
             <div className="chat-suggestions">
               {[
                 "How do I fix a Fusion 401 error?",
@@ -253,6 +359,11 @@ export default function Home() {
                   <div className="chat-bubble-role">
                     {msg.role === "user" ? "You" : "Workfront AI"}
                   </div>
+                  {msg.image && (
+                    <div className="chat-bubble-image">
+                      <img src={msg.image} alt="Attached screenshot" />
+                    </div>
+                  )}
                   <div className="chat-bubble-text">
                     {msg.content || (isTyping && i === messages.length - 1) ? (
                       msg.content || <div className="typing-dots"><span /><span /><span /></div>
@@ -269,7 +380,48 @@ export default function Home() {
 
       {/* Input */}
       <div className="chat-input-bar" id="chat-input-bar">
+        {/* Image Preview */}
+        {attachedImage && (
+          <div className="chat-image-preview">
+            <div className="chat-image-preview-thumb">
+              <img src={attachedImage.dataUrl} alt="Preview" />
+              <button
+                className="chat-image-preview-remove"
+                onClick={() => setAttachedImage(null)}
+                title="Remove image"
+              >
+                ×
+              </button>
+            </div>
+            <span className="chat-image-preview-name">{attachedImage.name}</span>
+          </div>
+        )}
+
         <div className="chat-input-container">
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleFileSelect}
+            style={{ display: "none" }}
+          />
+
+          {/* Attach button */}
+          <button
+            className="chat-attach-btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isTyping}
+            title="Attach screenshot"
+            id="attach-image-button"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21 15 16 10 5 21" />
+            </svg>
+          </button>
+
           <input
             ref={inputRef}
             id="chat-input"
@@ -281,14 +433,24 @@ export default function Home() {
                 sendMessage();
               }
             }}
-            placeholder="Ask a Workfront question…"
+            onPaste={(e) => {
+              const items = e.clipboardData.items;
+              for (let i = 0; i < items.length; i++) {
+                if (items[i].type.startsWith("image/")) {
+                  const file = items[i].getAsFile();
+                  if (file) processImageFile(file);
+                  break;
+                }
+              }
+            }}
+            placeholder={attachedImage ? "Describe what you need help with…" : "Ask a Workfront question…"}
             disabled={isTyping}
             autoComplete="off"
           />
           <button
             className="chat-send-btn"
             onClick={sendMessage}
-            disabled={isTyping || !input.trim()}
+            disabled={isTyping || (!input.trim() && !attachedImage)}
             id="chat-send-button"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
