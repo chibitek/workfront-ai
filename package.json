@@ -9,7 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
+    "ollama": "^0.6.0",
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.99.0",
     "adm-zip": "^0.5.16",
