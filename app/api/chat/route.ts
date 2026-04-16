@@ -21,7 +21,7 @@ const ollama = new Ollama({
     : {}),
 });
 
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gemma4";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gemma4:e4b-cloud";
 
 export async function POST(req: Request) {
   try {
