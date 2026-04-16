@@ -253,26 +253,15 @@ export default function Home() {
                   <div className="chat-bubble-role">
                     {msg.role === "user" ? "You" : "Workfront AI"}
                   </div>
-                  <div className="chat-bubble-text">{msg.content}</div>
-                </div>
-              </div>
-            ))}
-            {isTyping && (
-              <div className="chat-bubble chat-bubble-ai">
-                <div className="chat-bubble-avatar">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z" />
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  </svg>
-                </div>
-                <div className="chat-bubble-content">
-                  <div className="chat-bubble-role">Workfront AI</div>
-                  <div className="typing-dots">
-                    <span /><span /><span />
+                  <div className="chat-bubble-text">
+                    {msg.content || (isTyping && i === messages.length - 1) ? (
+                      msg.content || <div className="typing-dots"><span /><span /><span /></div>
+                    ) : null}
                   </div>
                 </div>
               </div>
-            )}
+            ))}
+
           </>
         )}
 
