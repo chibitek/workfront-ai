@@ -39,6 +39,9 @@ export default function Home() {
     setInput("");
     setIsTyping(true);
 
+    // Add an empty assistant message that we'll fill incrementally
+    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -46,26 +49,91 @@ export default function Home() {
         body: JSON.stringify({ message: text, sessionId }),
       });
 
-      const data = await res.json();
+      if (!res.ok) {
+        const data = await res.json();
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: `Error: ${data.error || "Request failed"}`,
+          };
+          return updated;
+        });
+        return;
+      }
 
-      if (data.sessionId) setSessionId(data.sessionId);
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
 
-      if (data.answer) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: data.answer },
-        ]);
-      } else if (data.error) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: `Error: ${data.error}` },
-        ]);
+      const decoder = new TextDecoder();
+      let fullText = "";
+      let sessionCaptured = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+
+        // The first line contains the session ID
+        if (!sessionCaptured && chunk.includes("__SESSION__:")) {
+          const lines = chunk.split("\n");
+          const sessionLine = lines.find((l: string) => l.startsWith("__SESSION__:"));
+          if (sessionLine) {
+            const newSid = sessionLine.replace("__SESSION__:", "");
+            setSessionId(newSid);
+            sessionCaptured = true;
+            // Get any remaining text after the session line
+            const rest = lines.filter((l: string) => !l.startsWith("__SESSION__:")).join("\n");
+            if (rest) {
+              fullText += rest;
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  role: "assistant",
+                  content: fullText,
+                };
+                return updated;
+              });
+            }
+            continue;
+          }
+        }
+
+        // Check for error marker
+        if (chunk.includes("__ERROR__:")) {
+          const errorMsg = chunk.split("__ERROR__:")[1] || "Unknown error";
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              role: "assistant",
+              content: `Error: ${errorMsg}`,
+            };
+            return updated;
+          });
+          break;
+        }
+
+        fullText += chunk;
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: fullText,
+          };
+          return updated;
+        });
+        setTimeout(scrollToBottom, 10);
       }
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Request failed. Please try again." },
-      ]);
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: "Request failed. Please try again.",
+        };
+        return updated;
+      });
     } finally {
       setIsTyping(false);
     }

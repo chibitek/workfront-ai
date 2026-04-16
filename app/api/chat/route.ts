@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { createServerSupabaseClient } from "@/lib/supabaseServerAuth";
 import { Ollama } from "ollama";
@@ -32,7 +31,7 @@ export async function POST(req: Request) {
     const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
 
     if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await req.json();
@@ -40,7 +39,7 @@ export async function POST(req: Request) {
     const sessionId = body?.sessionId as string | undefined;
 
     if (!message.trim()) {
-      return NextResponse.json({ error: "Missing message" }, { status: 400 });
+      return Response.json({ error: "Missing message" }, { status: 400 });
     }
 
     let sid = sessionId;
@@ -54,14 +53,14 @@ export async function POST(req: Request) {
         .single();
 
       if (sessionError) {
-        return NextResponse.json(
+        return Response.json(
           { error: sessionError.message || "Failed to create session" },
           { status: 500 }
         );
       }
 
       if (!session) {
-        return NextResponse.json(
+        return Response.json(
           { error: "Failed to create session" },
           { status: 500 }
         );
@@ -76,7 +75,7 @@ export async function POST(req: Request) {
       .insert({ session_id: sid, role: "user", content: message });
 
     if (insUserErr) {
-      return NextResponse.json(
+      return Response.json(
         { error: insUserErr.message },
         { status: 500 }
       );
@@ -91,7 +90,7 @@ export async function POST(req: Request) {
     );
 
     if (internalErr) {
-      return NextResponse.json(
+      return Response.json(
         { error: internalErr.message },
         { status: 500 }
       );
@@ -105,7 +104,6 @@ export async function POST(req: Request) {
     console.log("Internal matches:", strongInternalMatches.length);
 
     let finalMatches = strongInternalMatches;
-    let sourceMode: "internal" | "external" = "internal";
 
     if (finalMatches.length === 0) {
       console.log("No strong internal matches. Running external fallback...");
@@ -116,7 +114,7 @@ export async function POST(req: Request) {
       );
 
       if (externalErr) {
-        return NextResponse.json(
+        return Response.json(
           { error: externalErr.message },
           { status: 500 }
         );
@@ -125,16 +123,16 @@ export async function POST(req: Request) {
       finalMatches = (externalMatches ?? []).filter(
         (m: any) => (m.rank ?? 0) > 0.01
       );
-
-      sourceMode = "external";
     }
 
-    const sources = finalMatches.map((m: any) => ({
-      title: m.title ?? "(no title)",
-      url: m.source_url ?? "",
-      type: m.source_type ?? "",
-      score: m.score ?? m.rank ?? 0,
-    }));
+    console.log("Calling Ollama (Gemma 4) with streaming...");
+
+    if (!process.env.OLLAMA_API_KEY) {
+      return Response.json(
+        { error: "Missing OLLAMA_API_KEY" },
+        { status: 500 }
+      );
+    }
 
     const context = finalMatches
       .map((m: any, i: number) => {
@@ -147,15 +145,6 @@ export async function POST(req: Request) {
     ${m.content ?? ""}`;
       })
       .join("\n\n---\n\n");
-
-    console.log("Calling Ollama (Gemma 4)...");
-
-    if (!process.env.OLLAMA_API_KEY) {
-      return NextResponse.json(
-        { error: "Missing OLLAMA_API_KEY" },
-        { status: 500 }
-      );
-    }
 
     const systemPrompt = `You are an expert Adobe Workfront support assistant for an internal MSP team at Chibitek.
 
@@ -174,42 +163,63 @@ How to answer:
 INTERNAL CONTEXT (from team conversations):
 ${context}`;
 
-    const result = await ollama.chat({
-      model: OLLAMA_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: message },
-      ],
+    // Capture the session ID to send to the client
+    const capturedSid = sid;
+
+    // Stream the response using a ReadableStream
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          // Send the sessionId as the first line so the client can capture it
+          controller.enqueue(encoder.encode(`__SESSION__:${capturedSid}\n`));
+
+          const response = await ollama.chat({
+            model: OLLAMA_MODEL,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: message },
+            ],
+            stream: true,
+          });
+
+          let fullText = "";
+
+          for await (const part of response) {
+            const chunk = part.message.content;
+            fullText += chunk;
+            controller.enqueue(encoder.encode(chunk));
+          }
+
+          // Save the complete response to Supabase after streaming finishes
+          const { error: insAsstErr } = await supabaseServer
+            .from("chat_messages")
+            .insert({ session_id: capturedSid, role: "assistant", content: fullText });
+
+          if (insAsstErr) {
+            console.error("Failed to save assistant message:", insAsstErr.message);
+          }
+
+          console.log("POST /api/chat stream complete");
+          controller.close();
+        } catch (err: any) {
+          console.error("Streaming error:", err);
+          controller.enqueue(encoder.encode(`\n\n__ERROR__:${err?.message || "Unknown streaming error"}`));
+          controller.close();
+        }
+      },
     });
 
-    const answerText = result.message.content;
-
-    console.log("Saving assistant message...");
-    const { error: insAsstErr } = await supabaseServer
-      .from("chat_messages")
-      .insert({ session_id: sid, role: "assistant", content: answerText });
-
-    if (insAsstErr) {
-      return NextResponse.json(
-        { error: insAsstErr.message },
-        { status: 500 }
-      );
-    }
-
-    console.log("POST /api/chat success");
-    return NextResponse.json({
-      sessionId: sid,
-      answer: answerText,
-      sources,
-      debug: {
-        searchQuery,
-        rawMatchCount: internalMatches?.length ?? 0,
-        strongMatchCount: strongInternalMatches.length,
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Transfer-Encoding": "chunked",
+        "Cache-Control": "no-cache",
       },
     });
   } catch (err: any) {
     console.error("POST /api/chat fatal error:", err);
-    return NextResponse.json(
+    return Response.json(
       { error: err?.message || "Unknown server error" },
       { status: 500 }
     );
