@@ -1,27 +1,18 @@
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
-import { Ollama } from "ollama";
+import { embedOne } from "../lib/embeddings";
 
 // Verifies semantic retrieval: each paraphrase below deliberately AVOIDS the
 // keywords in the curated entry's title, so keyword/FTS search would miss it.
 // A passing run means vector similarity surfaced the right curated entry.
 //
 // Prereq: 001_semantic_curated.sql applied, embedCuratedKnowledge.ts run, and
-// Ollama Cloud embeddings access enabled.
+// the embedding provider (see lib/embeddings.ts) reachable.
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-const ollama = new Ollama({
-  host: process.env.OLLAMA_HOST || "https://ollama.com",
-  ...(process.env.OLLAMA_API_KEY
-    ? { headers: { Authorization: `Bearer ${process.env.OLLAMA_API_KEY}` } }
-    : {}),
-});
-
-const EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || "embeddinggemma";
 
 // paraphrase -> slug we expect to surface as the top curated match
 const CASES = [
@@ -31,15 +22,9 @@ const CASES = [
 ];
 
 async function main() {
-  if (!process.env.OLLAMA_API_KEY) {
-    console.error("Missing OLLAMA_API_KEY.");
-    process.exit(1);
-  }
-
   let pass = 0;
   for (const c of CASES) {
-    const emb: any = await ollama.embed({ model: EMBED_MODEL, input: c.q });
-    const queryEmbedding = emb?.embeddings?.[0];
+    const queryEmbedding = await embedOne(c.q);
 
     const { data, error } = await supabase.rpc(
       "match_knowledge_base_threads_semantic",

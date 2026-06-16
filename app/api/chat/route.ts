@@ -1,5 +1,6 @@
 import { supabaseServer } from "@/lib/supabaseServer";
 import { createServerSupabaseClient } from "@/lib/supabaseServerAuth";
+import { embedOne } from "@/lib/embeddings";
 import { Ollama } from "ollama";
 
 function simplifySearchQuery(input: string) {
@@ -22,13 +23,10 @@ const ollama = new Ollama({
 
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gemma4:31b";
 
-// Embedding model for semantic retrieval. Must match the vector() dimension in
-// the knowledge_base_threads.embedding column (see scripts/sql/001_semantic_curated.sql).
-const EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || "embeddinggemma";
-
 // Gate for semantic search. Leave unset until the migration is applied, the
-// backfill has run, and Ollama Cloud embeddings access is enabled — otherwise
-// every request would make a failing embed call. Set to "true" to turn on.
+// backfill has run, and the embedding provider (see lib/embeddings.ts) is
+// reachable — otherwise every request would make a failing embed call. Set to
+// "true" to turn on.
 const SEMANTIC_SEARCH_ENABLED = process.env.SEMANTIC_SEARCH_ENABLED === "true";
 
 export async function POST(req: Request) {
@@ -119,8 +117,7 @@ export async function POST(req: Request) {
     // access or the RPC isn't available, we log and fall back to FTS-only.
     let semanticMatches: any[] = [];
     if (SEMANTIC_SEARCH_ENABLED) try {
-      const emb = await ollama.embed({ model: EMBED_MODEL, input: message });
-      const queryEmbedding = (emb as any)?.embeddings?.[0];
+      const queryEmbedding = await embedOne(message);
       if (queryEmbedding) {
         const { data: sem, error: semErr } = await supabaseServer.rpc(
           "match_knowledge_base_threads_semantic",

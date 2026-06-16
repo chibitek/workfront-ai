@@ -3,10 +3,11 @@
 -- Run this in the Supabase SQL editor (the service-role REST key can't run DDL).
 --
 -- IMPORTANT — dimensions must match the embedding model:
---   The vector(768) below assumes an Ollama embedding model that outputs 768
---   dims (e.g. embeddinggemma / nomic-embed-text). If you switch models,
---   change 768 here AND set OLLAMA_EMBED_MODEL accordingly for the scripts and
---   the chat route. The number must match exactly or inserts will error.
+--   vector(768) works for either provider (see lib/embeddings.ts):
+--     - Ollama: embeddinggemma / nomic-embed-text are natively 768.
+--     - OpenAI: text-embedding-3-small forced to 768 via OPENAI_EMBED_DIMS.
+--   If you use a model with a different dimension, change 768 everywhere it
+--   appears below. The number must match exactly or inserts will error.
 
 -- 1. pgvector (no-op if already enabled — knowledge_base.embedding implies it is).
 create extension if not exists vector;

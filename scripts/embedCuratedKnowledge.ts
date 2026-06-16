@@ -1,31 +1,22 @@
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
-import { Ollama } from "ollama";
+import { embed, embedModelLabel } from "../lib/embeddings";
 
 // Backfills vector embeddings for the curated subset of knowledge_base_threads
-// (high-signal threads + curated Q&A), via Ollama Cloud. Idempotent and
-// resumable: embed_candidates() only returns rows where embedding IS NULL, so
-// re-running picks up where it left off (and re-runs after adding new curated
-// entries will embed just those).
+// (high-signal threads + curated Q&A). Provider is set by EMBED_PROVIDER (see
+// lib/embeddings.ts). Idempotent and resumable: embed_candidates() only returns
+// rows where embedding IS NULL, so re-running picks up where it left off (and
+// re-runs after adding new curated entries will embed just those).
 //
-// Prereq: Ollama Cloud embeddings access must be enabled for OLLAMA_API_KEY,
-// and 001_semantic_curated.sql must have been applied with a vector dimension
-// matching OLLAMA_EMBED_MODEL's output.
+// Prereq: the embedding provider must be reachable, and 001_semantic_curated.sql
+// must have been applied with a vector dimension matching the provider's output
+// (both providers are configured for 768 dims).
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const ollama = new Ollama({
-  host: process.env.OLLAMA_HOST || "https://ollama.com",
-  ...(process.env.OLLAMA_API_KEY
-    ? { headers: { Authorization: `Bearer ${process.env.OLLAMA_API_KEY}` } }
-    : {}),
-});
-
-// Must output the same dimension as the vector() column in the migration.
-const EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || "embeddinggemma";
 const BATCH = Number(process.env.EMBED_BATCH || 200); // rows fetched + embedded per loop
 const UPDATE_CONCURRENCY = 20; // parallel row updates per batch
 
@@ -35,8 +26,7 @@ function embedInput(title: string | null, content: string | null) {
 }
 
 async function embedBatch(inputs: string[]): Promise<number[][]> {
-  const res: any = await ollama.embed({ model: EMBED_MODEL, input: inputs });
-  const vectors = res.embeddings as number[][] | undefined;
+  const vectors = await embed(inputs);
   if (!vectors || vectors.length !== inputs.length) {
     throw new Error(
       `Embedding count mismatch: sent ${inputs.length}, got ${vectors?.length ?? 0}`
@@ -66,12 +56,7 @@ async function updateRows(rows: { id: string }[], vectors: number[][]) {
 }
 
 async function main() {
-  if (!process.env.OLLAMA_API_KEY) {
-    console.error("Missing OLLAMA_API_KEY.");
-    process.exit(1);
-  }
-
-  console.log(`Embedding curated rows with model "${EMBED_MODEL}" (batch ${BATCH})...`);
+  console.log(`Embedding curated rows with ${embedModelLabel()} (batch ${BATCH})...`);
 
   let totalEmbedded = 0;
   let totalFailures = 0;
