@@ -22,6 +22,15 @@ const ollama = new Ollama({
 
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gemma4:31b";
 
+// Embedding model for semantic retrieval. Must match the vector() dimension in
+// the knowledge_base_threads.embedding column (see scripts/sql/001_semantic_curated.sql).
+const EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || "embeddinggemma";
+
+// Gate for semantic search. Leave unset until the migration is applied, the
+// backfill has run, and Ollama Cloud embeddings access is enabled — otherwise
+// every request would make a failing embed call. Set to "true" to turn on.
+const SEMANTIC_SEARCH_ENABLED = process.env.SEMANTIC_SEARCH_ENABLED === "true";
+
 export async function POST(req: Request) {
   try {
     console.log("POST /api/chat start");
@@ -102,9 +111,42 @@ export async function POST(req: Request) {
     );
 
     console.log("Internal search query:", searchQuery);
-    console.log("Internal matches:", strongInternalMatches.length);
+    console.log("Internal matches (FTS):", strongInternalMatches.length);
 
-    let finalMatches = strongInternalMatches;
+    // Semantic search over the curated, embedded subset. Uses the RAW message
+    // (full sentence) rather than the keyword-stripped query, since vector
+    // similarity works better with natural phrasing. Fail-safe: if embeddings
+    // access or the RPC isn't available, we log and fall back to FTS-only.
+    let semanticMatches: any[] = [];
+    if (SEMANTIC_SEARCH_ENABLED) try {
+      const emb = await ollama.embed({ model: EMBED_MODEL, input: message });
+      const queryEmbedding = (emb as any)?.embeddings?.[0];
+      if (queryEmbedding) {
+        const { data: sem, error: semErr } = await supabaseServer.rpc(
+          "match_knowledge_base_threads_semantic",
+          { query_embedding: queryEmbedding, match_count: 10 }
+        );
+        if (semErr) {
+          console.warn("Semantic search unavailable:", semErr.message);
+        } else {
+          semanticMatches = (sem ?? []).filter((m: any) => (m.score ?? 0) > 0.3);
+        }
+      }
+    } catch (e: any) {
+      console.warn("Semantic search skipped:", String(e?.message || e).slice(0, 120));
+    }
+
+    console.log("Internal matches (semantic):", semanticMatches.length);
+
+    // Merge semantic results first (better for paraphrased questions), then
+    // FTS results, deduped by source_url/title. Cap at 10 for context size.
+    const mergedMap = new Map<string, any>();
+    for (const m of [...semanticMatches, ...strongInternalMatches]) {
+      const key = m.source_url || m.title || String(m.id);
+      if (!mergedMap.has(key)) mergedMap.set(key, m);
+    }
+
+    let finalMatches = Array.from(mergedMap.values()).slice(0, 10);
 
     if (finalMatches.length === 0) {
       console.log("No strong internal matches. Running external fallback...");
