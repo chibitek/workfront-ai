@@ -21,8 +21,13 @@ let openaiClient: OpenAI | null = null;
 
 function getOllama() {
   if (!ollamaClient) {
+    // Embeddings can run on a different host than chat — e.g. local Ollama
+    // (embeddinggemma) for dev/backfill while chat stays on Ollama Cloud
+    // (gemma4:31b). Falls back to OLLAMA_HOST, then Cloud.
+    const host =
+      process.env.OLLAMA_EMBED_HOST || process.env.OLLAMA_HOST || "https://ollama.com";
     ollamaClient = new Ollama({
-      host: process.env.OLLAMA_HOST || "https://ollama.com",
+      host,
       ...(process.env.OLLAMA_API_KEY
         ? { headers: { Authorization: `Bearer ${process.env.OLLAMA_API_KEY}` } }
         : {}),
