@@ -218,6 +218,10 @@ How to answer:
 - NEVER reference or cite the internal context directly. Do not mention "internal discussions", "our logs", "slack", or any source URLs.
 - Do NOT include any "Sources:" section.
 
+Formatting rules:
+- Do NOT use Markdown headers (no "#", "##", or "###"). To call out a section or important point, use **bold text** instead so key info stands out at a glance.
+- Use plain text and standard Markdown only. NEVER use LaTeX or math syntax — write arrows as "->" or the word, not "$\\rightarrow$"; write any symbols in plain text.
+
 INTERNAL CONTEXT (from team conversations):
 ${context}
 ${imageBase64 ? "\nThe user has attached a screenshot. Analyze the image carefully and incorporate what you see into your response. Describe any errors, UI elements, or issues visible in the screenshot." : ""}`;
