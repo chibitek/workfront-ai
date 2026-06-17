@@ -9,15 +9,17 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "ollama": "^0.6.0",
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.99.0",
+    "@types/pg": "^8.20.0",
     "adm-zip": "^0.5.16",
     "axios": "^1.13.6",
     "cheerio": "^1.2.0",
     "dotenv": "^17.3.1",
     "next": "16.1.6",
+    "ollama": "^0.6.0",
     "openai": "^6.25.0",
+    "pg": "^8.21.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "tsx": "^4.21.0"
