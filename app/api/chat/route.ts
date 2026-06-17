@@ -1,5 +1,6 @@
 import { supabaseServer } from "@/lib/supabaseServer";
 import { createServerSupabaseClient } from "@/lib/supabaseServerAuth";
+import { embedOne } from "@/lib/embeddings";
 import { Ollama } from "ollama";
 
 function simplifySearchQuery(input: string) {
@@ -21,6 +22,17 @@ const ollama = new Ollama({
 });
 
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gemma4:31b";
+
+// Gate for semantic search. Leave unset until the migration is applied, the
+// backfill has run, and the embedding provider (see lib/embeddings.ts) is
+// reachable — otherwise every request would make a failing embed call. Set to
+// "true" to turn on.
+const SEMANTIC_SEARCH_ENABLED = process.env.SEMANTIC_SEARCH_ENABLED === "true";
+
+// Score bump applied to curated (hand-vetted) entries so they lead the context
+// when relevant. Tuned so a reasonably-relevant curated answer (cosine ~0.5)
+// outranks top real threads (~0.59), while an irrelevant one stays filtered.
+const CURATED_BOOST = Number(process.env.CURATED_BOOST || 0.15);
 
 export async function POST(req: Request) {
   try {
@@ -102,9 +114,54 @@ export async function POST(req: Request) {
     );
 
     console.log("Internal search query:", searchQuery);
-    console.log("Internal matches:", strongInternalMatches.length);
+    console.log("Internal matches (FTS):", strongInternalMatches.length);
 
-    let finalMatches = strongInternalMatches;
+    // Semantic search over the curated, embedded subset. Uses the RAW message
+    // (full sentence) rather than the keyword-stripped query, since vector
+    // similarity works better with natural phrasing. Fail-safe: if embeddings
+    // access or the RPC isn't available, we log and fall back to FTS-only.
+    let semanticMatches: any[] = [];
+    if (SEMANTIC_SEARCH_ENABLED) try {
+      const queryEmbedding = await embedOne(message);
+      if (queryEmbedding) {
+        // Pull a wider pool than we keep, so a relevant curated answer that
+        // ranks below the top threads is still available to be boosted.
+        const { data: sem, error: semErr } = await supabaseServer.rpc(
+          "match_knowledge_base_threads_semantic",
+          { query_embedding: queryEmbedding, match_count: 25 }
+        );
+        if (semErr) {
+          console.warn("Semantic search unavailable:", semErr.message);
+        } else {
+          // Curated, hand-vetted answers get a score bump so they lead the
+          // context when relevant — without forcing in irrelevant ones (those
+          // stay below the 0.3 floor even after the boost).
+          semanticMatches = (sem ?? [])
+            .map((m: any) => ({
+              ...m,
+              rankScore:
+                (m.score ?? 0) + (m.source_type === "curated_qa" ? CURATED_BOOST : 0),
+            }))
+            .filter((m: any) => (m.score ?? 0) > 0.3)
+            .sort((a: any, b: any) => b.rankScore - a.rankScore);
+        }
+      }
+    } catch (e: any) {
+      console.warn("Semantic search skipped:", String(e?.message || e).slice(0, 120));
+    }
+
+    console.log("Internal matches (semantic):", semanticMatches.length);
+
+    // Merge boosted-semantic results first (curated answers lead, then best
+    // real threads), then FTS results, deduped by source_url/title. Cap at 10
+    // for context size.
+    const mergedMap = new Map<string, any>();
+    for (const m of [...semanticMatches, ...strongInternalMatches]) {
+      const key = m.source_url || m.title || String(m.id);
+      if (!mergedMap.has(key)) mergedMap.set(key, m);
+    }
+
+    let finalMatches = Array.from(mergedMap.values()).slice(0, 10);
 
     if (finalMatches.length === 0) {
       console.log("No strong internal matches. Running external fallback...");
