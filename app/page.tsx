@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useAuth } from "@/app/components/AuthProvider";
 
 type Message = {
@@ -365,8 +367,16 @@ export default function Home() {
                     </div>
                   )}
                   <div className="chat-bubble-text">
-                    {msg.content || (isTyping && i === messages.length - 1) ? (
-                      msg.content || <div className="typing-dots"><span /><span /><span /></div>
+                    {msg.content ? (
+                      msg.role === "assistant" ? (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.content}
+                        </ReactMarkdown>
+                      ) : (
+                        msg.content
+                      )
+                    ) : isTyping && i === messages.length - 1 ? (
+                      <div className="typing-dots"><span /><span /><span /></div>
                     ) : null}
                   </div>
                 </div>
